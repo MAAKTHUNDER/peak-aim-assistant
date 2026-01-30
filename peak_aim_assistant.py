@@ -112,7 +112,7 @@ class MacroThread(QThread):
                     self.right_click_pressed = False
                     hold_duration = (time.time() - self.right_click_time) * 1000
                     # Reduced threshold for faster response
-                    if hold_duration < 500:
+                    if hold_duration < 300:
                         self.scope_toggled = not self.scope_toggled
         
         mouse_listener = MouseListener(on_click=on_click)
