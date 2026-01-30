@@ -97,7 +97,7 @@ class MacroThread(QThread):
                 exe_name = process_name.value.lower()
                 
                 # Check if it's one of the GameLoop executables
-                if exe_name in ['androidemulator.exe', 'androidemulatore.exe', 'androidemulatorex.exe']:
+                if exe_name in ['AndroidEmulator.exe', 'AndroidEmulatorEn.exe', 'AndroidEmulatorEx.exe']:
                     return True
             
             return False
