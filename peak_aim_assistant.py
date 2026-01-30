@@ -64,32 +64,50 @@ class MacroThread(QThread):
         try:
             user32 = ctypes.windll.user32
             hwnd = user32.GetForegroundWindow()
+            
+            if hwnd == 0:
+                return False
+            
             length = user32.GetWindowTextLengthW(hwnd)
+            if length == 0:
+                return False
+                
             buff = ctypes.create_unicode_buffer(length + 1)
             user32.GetWindowTextW(hwnd, buff, length + 1)
-            window_title = buff.value.lower()
             
-            # Check for GameLoop processes
-            import win32process
-            import psutil
+            # Get process name
+            MAX_PATH = 260
+            process_name = ctypes.create_unicode_buffer(MAX_PATH)
             
-            _, pid = win32process.GetWindowThreadProcessId(hwnd)
-            try:
-                process = psutil.Process(pid)
-                process_name = process.name().lower()
+            PROCESS_QUERY_INFORMATION = 0x0400
+            PROCESS_VM_READ = 0x0010
+            
+            kernel32 = ctypes.windll.kernel32
+            process_id = ctypes.c_ulong()
+            
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(process_id))
+            
+            hProcess = kernel32.OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, False, process_id)
+            
+            if hProcess:
+                psapi = ctypes.windll.psapi
+                psapi.GetModuleBaseNameW(hProcess, None, process_name, MAX_PATH)
+                kernel32.CloseHandle(hProcess)
+                
+                exe_name = process_name.value.lower()
                 
                 # Check if it's one of the GameLoop executables
-                if process_name in ['androidemulator.exe', 'androidemulatore.exe', 'androidemulatorex.exe']:
+                if exe_name in ['androidemulator.exe', 'androidemulatore.exe', 'androidemulatorex.exe']:
                     return True
-            except:
-                pass
             
             return False
-        except:
+        except Exception as e:
+            print(f"Error checking GameLoop: {e}")
             return False
     
     def run(self):
         def on_click(x, y, button, pressed):
+            # Only process right-click when GameLoop is active
             if not self.is_gameloop_active():
                 return
                 
@@ -100,7 +118,7 @@ class MacroThread(QThread):
                 else:
                     self.right_click_pressed = False
                     hold_duration = (time.time() - self.right_click_time) * 1000
-                    # Reduced threshold from 1000ms to 500ms for faster response
+                    # Reduced threshold for faster response
                     if hold_duration < 500:
                         self.scope_toggled = not self.scope_toggled
         
@@ -110,7 +128,9 @@ class MacroThread(QThread):
         while self.running:
             try:
                 # Only work if GameLoop is active
-                if not self.is_gameloop_active():
+                gameloop_active = self.is_gameloop_active()
+                
+                if not gameloop_active:
                     if self.o_held:
                         keyboard.release('o')
                         self.o_held = False
@@ -179,15 +199,13 @@ class MainWindow(QMainWindow):
         self.watchdog_timer.timeout.connect(self.watchdog_check)
         self.watchdog_timer.start(2000)
         
-        # Set window icon
         self.set_window_icon()
         
     def set_window_icon(self):
-        """Set window icon - will use icon.ico if it exists"""
+        """Set window icon"""
         if os.path.exists("icon.ico"):
             self.setWindowIcon(QIcon("icon.ico"))
         else:
-            # Create a simple colored icon if icon.ico doesn't exist
             pixmap = QPixmap(32, 32)
             pixmap.fill(QColor(0, 255, 0))
             self.setWindowIcon(QIcon(pixmap))
@@ -359,7 +377,6 @@ class MainWindow(QMainWindow):
         self.tray_icon = QSystemTrayIcon(self)
         self.tray_icon.setToolTip("Peak & Aim Assistant")
         
-        # Use icon.ico if it exists, otherwise create a simple icon
         if os.path.exists("icon.ico"):
             self.tray_icon.setIcon(QIcon("icon.ico"))
         else:
