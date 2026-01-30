@@ -3,6 +3,8 @@ name: Build EXE
 on:
   push:
     branches: [ main ]
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
@@ -10,7 +12,8 @@ jobs:
     runs-on: windows-latest
     
     steps:
-    - uses: actions/checkout@v3
+    - name: Checkout code
+      uses: actions/checkout@v3
     
     - name: Set up Python
       uses: actions/setup-python@v4
@@ -27,8 +30,9 @@ jobs:
       run: |
         pyinstaller --onefile --windowed --name=PeakAimAssistant peak_aim_assistant.py
     
-    - name: Upload EXE
+    - name: Upload EXE artifact
       uses: actions/upload-artifact@v4
       with:
-        name: PeakAimAssistant-EXE
+        name: PeakAimAssistant-Windows
         path: dist/PeakAimAssistant.exe
+        retention-days: 90
