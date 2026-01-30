@@ -35,7 +35,7 @@ jobs:
         }
     
     - name: Upload EXE artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: PeakAimAssistant-Windows
         path: dist/PeakAimAssistant.exe
