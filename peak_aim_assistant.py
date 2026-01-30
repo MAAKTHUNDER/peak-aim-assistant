@@ -1,14 +1,14 @@
 import sys
 import json
 import os
+import time
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QLabel, QLineEdit, 
-                             QCheckBox, QSystemTrayIcon, QMenu, QAction)
+                             QCheckBox, QSystemTrayIcon, QMenu, QAction, QMessageBox)
 from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal
-from PyQt5.QtGui import QIcon, QFont, QPalette, QColor
+from PyQt5.QtGui import QIcon, QFont, QPalette, QColor, QPixmap
 import keyboard
-import time
-from pynput.mouse import Listener as MouseListener
+from pynput.mouse import Button, Listener as MouseListener
 
 class OverlayWindow(QWidget):
     def __init__(self):
@@ -24,7 +24,7 @@ class OverlayWindow(QWidget):
         layout = QHBoxLayout()
         self.label = QLabel("● INACTIVE | Scope: CLOSED")
         self.label.setFont(QFont("Consolas", 10, QFont.Bold))
-        self.label.setStyleSheet("color: #FF0000; background-color: rgba(0, 0, 0, 180); padding: 5px;")
+        self.update_status(False, False, True)
         
         layout.addWidget(self.label)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -56,14 +56,16 @@ class MacroThread(QThread):
         self.o_held = False
         self.right_click_time = 0
         self.running = True
+        self.right_click_pressed = False
         
     def run(self):
-        # Mouse listener for right-click
         def on_click(x, y, button, pressed):
-            if str(button) == "Button.right":
+            if button == Button.right:
                 if pressed:
                     self.right_click_time = time.time()
+                    self.right_click_pressed = True
                 else:
+                    self.right_click_pressed = False
                     hold_duration = (time.time() - self.right_click_time) * 1000
                     if hold_duration < 1000:
                         self.scope_toggled = not self.scope_toggled
@@ -76,9 +78,8 @@ class MacroThread(QThread):
                 if self.enabled:
                     e_pressed = keyboard.is_pressed('e')
                     q_pressed = keyboard.is_pressed('q')
-                    right_click_held = keyboard.is_pressed('right')
                     
-                    scope_active = self.scope_toggled or right_click_held
+                    scope_active = self.scope_toggled or self.right_click_pressed
                     should_hold = (e_pressed or q_pressed) and not scope_active
                     
                     if should_hold and not self.o_held:
@@ -95,7 +96,7 @@ class MacroThread(QThread):
                         self.o_held = False
                     self.status_update.emit(False, self.scope_toggled)
                     
-                time.sleep(0.01)  # 10ms loop
+                time.sleep(0.01)
                 
             except Exception as e:
                 print(f"Error in macro thread: {e}")
@@ -129,8 +130,11 @@ class MainWindow(QMainWindow):
         self.setup_tray()
         self.setup_overlay()
         
-        # Setup F8 hotkey
         keyboard.add_hotkey('f8', self.toggle_macro)
+        
+        self.watchdog_timer = QTimer()
+        self.watchdog_timer.timeout.connect(self.watchdog_check)
+        self.watchdog_timer.start(2000)
         
     def load_settings(self):
         try:
@@ -167,9 +171,8 @@ class MainWindow(QMainWindow):
     
     def init_ui(self):
         self.setWindowTitle("Peak & Aim Assistant v1.0")
-        self.setFixedSize(400, 550)
+        self.setFixedSize(400, 595)
         
-        # Dark theme
         palette = QPalette()
         palette.setColor(QPalette.Window, QColor(30, 30, 30))
         palette.setColor(QPalette.WindowText, Qt.white)
@@ -180,14 +183,14 @@ class MainWindow(QMainWindow):
         
         layout = QVBoxLayout()
         
-        # Title
         title = QLabel("🎮 Peak & Aim Assistant")
         title.setFont(QFont("Segoe UI", 14, QFont.Bold))
         title.setAlignment(Qt.AlignCenter)
         title.setStyleSheet("color: white;")
         layout.addWidget(title)
         
-        # Status
+        layout.addWidget(QLabel("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", self))
+        
         status_layout = QHBoxLayout()
         self.status_dot = QLabel("●")
         self.status_dot.setFont(QFont("Segoe UI", 14))
@@ -201,25 +204,33 @@ class MainWindow(QMainWindow):
         status_layout.addStretch()
         layout.addLayout(status_layout)
         
-        # Toggle button
         self.toggle_btn = QPushButton("Toggle Macro (F8)")
         self.toggle_btn.setFont(QFont("Segoe UI", 10, QFont.Bold))
         self.toggle_btn.setFixedHeight(40)
         self.toggle_btn.clicked.connect(self.toggle_macro)
         layout.addWidget(self.toggle_btn)
         
-        # Position settings
+        settings_btn = QPushButton("⚙ Settings")
+        settings_btn.setFont(QFont("Segoe UI", 10, QFont.Bold))
+        settings_btn.setFixedHeight(40)
+        settings_btn.clicked.connect(self.show_settings)
+        layout.addWidget(settings_btn)
+        
         pos_label = QLabel("Overlay Position:")
         pos_label.setStyleSheet("color: #AAAAAA;")
         layout.addWidget(pos_label)
         
         pos_layout = QHBoxLayout()
-        pos_layout.addWidget(QLabel("X:"))
+        x_label = QLabel("X:")
+        x_label.setStyleSheet("color: white;")
+        pos_layout.addWidget(x_label)
         self.x_input = QLineEdit(str(self.overlay_x))
         self.x_input.setFixedWidth(80)
         pos_layout.addWidget(self.x_input)
         
-        pos_layout.addWidget(QLabel("Y:"))
+        y_label = QLabel("Y:")
+        y_label.setStyleSheet("color: white;")
+        pos_layout.addWidget(y_label)
         self.y_input = QLineEdit(str(self.overlay_y))
         self.y_input.setFixedWidth(80)
         pos_layout.addWidget(self.y_input)
@@ -229,19 +240,26 @@ class MainWindow(QMainWindow):
         pos_layout.addWidget(apply_btn)
         layout.addLayout(pos_layout)
         
-        # Checkboxes
         self.bg_check = QCheckBox("Show Background (Semi-transparent)")
+        self.bg_check.setStyleSheet("color: white;")
         self.bg_check.setChecked(self.overlay_bg)
         self.bg_check.stateChanged.connect(self.toggle_background)
         layout.addWidget(self.bg_check)
         
         self.minimize_check = QCheckBox("Start Minimized to Tray")
+        self.minimize_check.setStyleSheet("color: white;")
         self.minimize_check.setChecked(self.start_minimized)
         self.minimize_check.stateChanged.connect(self.toggle_minimize)
         layout.addWidget(self.minimize_check)
         
-        # Features
-        layout.addWidget(QLabel("\nFeatures:", self))
+        tip_label = QLabel("Tip: Right-click tray icon to show GUI")
+        tip_label.setStyleSheet("color: #888888; font-size: 8pt;")
+        layout.addWidget(tip_label)
+        
+        features_label = QLabel("Features:")
+        features_label.setStyleSheet("color: #AAAAAA;")
+        layout.addWidget(features_label)
+        
         features = [
             "☑ Peak & Aim (Q/E → O)",
             "☑ Scope Detection (Right-Click)",
@@ -253,10 +271,29 @@ class MainWindow(QMainWindow):
             label.setStyleSheet("color: #00FF00;")
             layout.addWidget(label)
         
-        layout.addStretch()
+        layout.addWidget(QLabel("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", self))
+        
+        hotkeys_label = QLabel("Hotkeys:")
+        hotkeys_label.setStyleSheet("color: white;")
+        layout.addWidget(hotkeys_label)
+        
+        hotkey1 = QLabel("F8 - Toggle Macro ON/OFF")
+        hotkey1.setStyleSheet("color: #CCCCCC;")
+        layout.addWidget(hotkey1)
+        
+        hotkey2 = QLabel("Q/E - Peak with Auto-Aim")
+        hotkey2.setStyleSheet("color: #CCCCCC;")
+        layout.addWidget(hotkey2)
+        
+        layout.addWidget(QLabel("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", self))
+        
+        footer = QLabel("Made for GameLoop | v1.0")
+        footer.setStyleSheet("color: #888888;")
+        footer.setAlignment(Qt.AlignCenter)
+        layout.addWidget(footer)
+        
         central_widget.setLayout(layout)
         
-        # Show or hide based on settings
         if self.is_first_run or not self.start_minimized:
             self.show()
         else:
@@ -266,7 +303,10 @@ class MainWindow(QMainWindow):
         self.tray_icon = QSystemTrayIcon(self)
         self.tray_icon.setToolTip("Peak & Aim Assistant")
         
-        # Create tray menu
+        pixmap = QPixmap(16, 16)
+        pixmap.fill(QColor(0, 255, 0))
+        self.tray_icon.setIcon(QIcon(pixmap))
+        
         tray_menu = QMenu()
         
         show_action = QAction("Show GUI", self)
@@ -295,31 +335,11 @@ class MainWindow(QMainWindow):
         self.overlay = OverlayWindow()
         self.overlay.move(self.overlay_x, self.overlay_y)
         self.overlay.update_status(False, False, self.overlay_bg)
-        
-        # Timer to check if GameLoop is active
-        self.overlay_timer = QTimer()
-        self.overlay_timer.timeout.connect(self.check_gameloop)
-        self.overlay_timer.start(100)
-    
-    def check_gameloop(self):
-        # Check if GameLoop window is active (simplified - you may need psutil for better detection)
-        try:
-            import win32gui
-            hwnd = win32gui.GetForegroundWindow()
-            title = win32gui.GetWindowText(hwnd)
-            
-            if "gameloop" in title.lower() or "emulator" in title.lower():
-                self.overlay.show()
-            else:
-                self.overlay.hide()
-        except:
-            # Fallback: always show overlay
-            self.overlay.show()
+        self.overlay.show()
     
     def update_overlay_status(self, active, scope_open):
         self.overlay.update_status(active, scope_open, self.overlay_bg)
         
-        # Update main GUI status
         if active:
             self.status_dot.setStyleSheet("color: #00FF00;")
             self.status_text.setStyleSheet("color: #00FF00;")
@@ -338,8 +358,9 @@ class MainWindow(QMainWindow):
             self.overlay_y = int(self.y_input.text())
             self.overlay.move(self.overlay_x, self.overlay_y)
             self.save_settings()
+            QMessageBox.information(self, "Success", f"Position saved: X={self.overlay_x}, Y={self.overlay_y}")
         except:
-            pass
+            QMessageBox.warning(self, "Error", "Invalid position values!")
     
     def toggle_background(self):
         self.overlay_bg = self.bg_check.isChecked()
@@ -348,6 +369,17 @@ class MainWindow(QMainWindow):
     def toggle_minimize(self):
         self.start_minimized = self.minimize_check.isChecked()
         self.save_settings()
+    
+    def show_settings(self):
+        QMessageBox.information(self, "Settings", "Advanced settings coming soon!\n\n• Custom key bindings\n• Multiple profiles\n• Theme customization")
+    
+    def watchdog_check(self):
+        if not self.macro_thread.enabled and self.macro_thread.o_held:
+            try:
+                keyboard.release('o')
+                self.macro_thread.o_held = False
+            except:
+                pass
     
     def closeEvent(self, event):
         event.ignore()
@@ -358,8 +390,11 @@ class MainWindow(QMainWindow):
         self.macro_thread.wait()
         QApplication.quit()
 
-if __name__ == '__main__':
+def main():
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     window = MainWindow()
     sys.exit(app.exec_())
+
+if __name__ == '__main__':
+    main()
