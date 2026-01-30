@@ -2,6 +2,7 @@ import sys
 import json
 import os
 import time
+import ctypes
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QLabel, QLineEdit, 
                              QCheckBox, QSystemTrayIcon, QMenu, QAction, QMessageBox)
@@ -58,8 +59,40 @@ class MacroThread(QThread):
         self.running = True
         self.right_click_pressed = False
         
+    def is_gameloop_active(self):
+        """Check if GameLoop window is active"""
+        try:
+            user32 = ctypes.windll.user32
+            hwnd = user32.GetForegroundWindow()
+            length = user32.GetWindowTextLengthW(hwnd)
+            buff = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(hwnd, buff, length + 1)
+            window_title = buff.value.lower()
+            
+            # Check for GameLoop processes
+            import win32process
+            import psutil
+            
+            _, pid = win32process.GetWindowThreadProcessId(hwnd)
+            try:
+                process = psutil.Process(pid)
+                process_name = process.name().lower()
+                
+                # Check if it's one of the GameLoop executables
+                if process_name in ['androidemulator.exe', 'androidemulatore.exe', 'androidemulatorex.exe']:
+                    return True
+            except:
+                pass
+            
+            return False
+        except:
+            return False
+    
     def run(self):
         def on_click(x, y, button, pressed):
+            if not self.is_gameloop_active():
+                return
+                
             if button == Button.right:
                 if pressed:
                     self.right_click_time = time.time()
@@ -67,7 +100,8 @@ class MacroThread(QThread):
                 else:
                     self.right_click_pressed = False
                     hold_duration = (time.time() - self.right_click_time) * 1000
-                    if hold_duration < 1000:
+                    # Reduced threshold from 1000ms to 500ms for faster response
+                    if hold_duration < 500:
                         self.scope_toggled = not self.scope_toggled
         
         mouse_listener = MouseListener(on_click=on_click)
@@ -75,6 +109,15 @@ class MacroThread(QThread):
         
         while self.running:
             try:
+                # Only work if GameLoop is active
+                if not self.is_gameloop_active():
+                    if self.o_held:
+                        keyboard.release('o')
+                        self.o_held = False
+                    self.status_update.emit(self.enabled, self.scope_toggled)
+                    time.sleep(0.05)
+                    continue
+                
                 if self.enabled:
                     e_pressed = keyboard.is_pressed('e')
                     q_pressed = keyboard.is_pressed('q')
@@ -136,6 +179,19 @@ class MainWindow(QMainWindow):
         self.watchdog_timer.timeout.connect(self.watchdog_check)
         self.watchdog_timer.start(2000)
         
+        # Set window icon
+        self.set_window_icon()
+        
+    def set_window_icon(self):
+        """Set window icon - will use icon.ico if it exists"""
+        if os.path.exists("icon.ico"):
+            self.setWindowIcon(QIcon("icon.ico"))
+        else:
+            # Create a simple colored icon if icon.ico doesn't exist
+            pixmap = QPixmap(32, 32)
+            pixmap.fill(QColor(0, 255, 0))
+            self.setWindowIcon(QIcon(pixmap))
+    
     def load_settings(self):
         try:
             if os.path.exists(self.settings_file):
@@ -252,7 +308,7 @@ class MainWindow(QMainWindow):
         self.minimize_check.stateChanged.connect(self.toggle_minimize)
         layout.addWidget(self.minimize_check)
         
-        tip_label = QLabel("Tip: Right-click tray icon to show GUI")
+        tip_label = QLabel("Tip: Only works when GameLoop is active")
         tip_label.setStyleSheet("color: #888888; font-size: 8pt;")
         layout.addWidget(tip_label)
         
@@ -263,8 +319,8 @@ class MainWindow(QMainWindow):
         features = [
             "☑ Peak & Aim (Q/E → O)",
             "☑ Scope Detection (Right-Click)",
-            "☑ Auto-Recovery & Watchdog",
-            "☑ Persistent Settings"
+            "☑ GameLoop-Only Mode",
+            "☑ Auto-Recovery & Watchdog"
         ]
         for feature in features:
             label = QLabel(feature)
@@ -303,9 +359,13 @@ class MainWindow(QMainWindow):
         self.tray_icon = QSystemTrayIcon(self)
         self.tray_icon.setToolTip("Peak & Aim Assistant")
         
-        pixmap = QPixmap(16, 16)
-        pixmap.fill(QColor(0, 255, 0))
-        self.tray_icon.setIcon(QIcon(pixmap))
+        # Use icon.ico if it exists, otherwise create a simple icon
+        if os.path.exists("icon.ico"):
+            self.tray_icon.setIcon(QIcon("icon.ico"))
+        else:
+            pixmap = QPixmap(16, 16)
+            pixmap.fill(QColor(0, 255, 0))
+            self.tray_icon.setIcon(QIcon(pixmap))
         
         tray_menu = QMenu()
         
