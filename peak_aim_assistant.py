@@ -6,7 +6,7 @@ import webbrowser
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QLabel, QLineEdit, 
                              QCheckBox, QSystemTrayIcon, QMenu, QAction, QMessageBox)
-from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal
+from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal, QSharedMemory
 from PyQt5.QtGui import QIcon, QFont, QPalette, QColor, QPixmap, QCursor
 import keyboard
 from pynput.mouse import Button, Listener as MouseListener
@@ -203,7 +203,7 @@ class MainWindow(QMainWindow):
     
     def init_ui(self):
         self.setWindowTitle("Peak & Aim Assistant v1.0")
-        self.setFixedSize(400, 630)
+        self.setFixedSize(400, 650)
         
         palette = QPalette()
         palette.setColor(QPalette.Window, QColor(30, 30, 30))
@@ -214,38 +214,42 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central_widget)
         
         layout = QVBoxLayout()
+        layout.setSpacing(8)
         
-        # Title section with logo
-        title_layout = QHBoxLayout()
+        # Title section with logo beside
+        title_container = QHBoxLayout()
+        title_container.addStretch()
         
         logo_path = resource_path("logo.png")
         if os.path.exists(logo_path):
             logo_label = QLabel()
             logo_pixmap = QPixmap(logo_path)
-            logo_label.setPixmap(logo_pixmap.scaled(48, 48, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-            title_layout.addWidget(logo_label)
+            logo_label.setPixmap(logo_pixmap.scaled(64, 64, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            title_container.addWidget(logo_label)
         
         title_text_layout = QVBoxLayout()
-        title_text_layout.setSpacing(2)
+        title_text_layout.setSpacing(0)
         
         title = QLabel("Peak & Aim Assistant")
-        title.setFont(QFont("Segoe UI", 13, QFont.Bold))
+        title.setFont(QFont("Segoe UI", 16, QFont.Bold))
         title.setStyleSheet("color: white;")
         title_text_layout.addWidget(title)
         
+        title_container.addLayout(title_text_layout)
+        title_container.addStretch()
+        
+        layout.addLayout(title_container)
+        
+        # Creator centered
         creator = QLabel("Created by MAAKTHUNDER")
-        creator.setFont(QFont("Segoe UI", 8))
+        creator.setFont(QFont("Segoe UI", 9))
         creator.setStyleSheet("color: #AAAAAA;")
-        title_text_layout.addWidget(creator)
-        
-        title_layout.addLayout(title_text_layout)
-        title_layout.addStretch()
-        
-        layout.addLayout(title_layout)
+        creator.setAlignment(Qt.AlignCenter)
+        layout.addWidget(creator)
         
         layout.addWidget(QLabel("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", self))
         
-        # Status
+        # Status (reduced spacing)
         status_layout = QHBoxLayout()
         self.status_dot = QLabel("●")
         self.status_dot.setFont(QFont("Segoe UI", 14))
@@ -327,34 +331,36 @@ class MainWindow(QMainWindow):
         
         layout.addWidget(QLabel("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", self))
         
-        # Social links with icons
+        # Social links with larger icons
         youtube_layout = QHBoxLayout()
-        youtube_layout.setSpacing(8)
+        youtube_layout.setSpacing(10)
         
         yt_icon_path = resource_path("youtube.png")
         if os.path.exists(yt_icon_path):
             yt_icon = QLabel()
             yt_pixmap = QPixmap(yt_icon_path)
-            yt_icon.setPixmap(yt_pixmap.scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            yt_icon.setPixmap(yt_pixmap.scaled(32, 32, Qt.KeepAspectRatio, Qt.SmoothTransformation))
             youtube_layout.addWidget(yt_icon)
         
-        yt_link = ClickableLabel("youtube.com/@MAAKTHUNDER", "https://www.youtube.com/@MAAKTHUNDER")
+        yt_link = ClickableLabel("WWW.YOUTUBE.COM/@MAAKTHUNDER", "https://www.youtube.com/@MAAKTHUNDER")
+        yt_link.setFont(QFont("Segoe UI", 10))
         yt_link.setStyleSheet("color: #00BFFF; text-decoration: underline;")
         youtube_layout.addWidget(yt_link)
         youtube_layout.addStretch()
         layout.addLayout(youtube_layout)
         
         tiktok_layout = QHBoxLayout()
-        tiktok_layout.setSpacing(8)
+        tiktok_layout.setSpacing(10)
         
         tt_icon_path = resource_path("tiktok.png")
         if os.path.exists(tt_icon_path):
             tt_icon = QLabel()
             tt_pixmap = QPixmap(tt_icon_path)
-            tt_icon.setPixmap(tt_pixmap.scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            tt_icon.setPixmap(tt_pixmap.scaled(32, 32, Qt.KeepAspectRatio, Qt.SmoothTransformation))
             tiktok_layout.addWidget(tt_icon)
         
-        tt_link = ClickableLabel("tiktok.com/@maakthunder", "https://www.tiktok.com/@maakthunder")
+        tt_link = ClickableLabel("WWW.TIKTOK.COM/@MAAKTHUNDER", "https://www.tiktok.com/@maakthunder")
+        tt_link.setFont(QFont("Segoe UI", 10))
         tt_link.setStyleSheet("color: #00BFFF; text-decoration: underline;")
         tiktok_layout.addWidget(tt_link)
         tiktok_layout.addStretch()
@@ -471,6 +477,20 @@ class MainWindow(QMainWindow):
 def main():
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
+    
+    # Single instance check
+    shared_mem = QSharedMemory("PeakAimAssistantUniqueName")
+    
+    if not shared_mem.create(1):
+        # App is already running
+        msg = QMessageBox()
+        msg.setIcon(QMessageBox.Warning)
+        msg.setWindowTitle("Already Running")
+        msg.setText("Peak & Aim Assistant is already running!")
+        msg.setInformativeText("Check your system tray.")
+        msg.exec_()
+        sys.exit(0)
+    
     window = MainWindow()
     sys.exit(app.exec_())
 
