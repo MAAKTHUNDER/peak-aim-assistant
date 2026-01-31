@@ -67,17 +67,14 @@ class MacroThread(QThread):
             kernel32 = ctypes.windll.kernel32
             psapi = ctypes.windll.psapi
             
-            # Get the currently focused window
             hwnd = user32.GetForegroundWindow()
             
             if hwnd == 0:
                 return False
             
-            # Get process ID of the focused window
             process_id = ctypes.c_ulong()
             user32.GetWindowThreadProcessId(hwnd, ctypes.byref(process_id))
             
-            # Open process to get its name
             PROCESS_QUERY_INFORMATION = 0x0400
             PROCESS_VM_READ = 0x0010
             hProcess = kernel32.OpenProcess(
@@ -89,7 +86,6 @@ class MacroThread(QThread):
             if not hProcess:
                 return False
             
-            # Get process executable name
             MAX_PATH = 260
             process_name = ctypes.create_unicode_buffer(MAX_PATH)
             psapi.GetModuleBaseNameW(hProcess, None, process_name, MAX_PATH)
@@ -97,8 +93,7 @@ class MacroThread(QThread):
             
             exe_name = process_name.value.lower()
             
-            # Check if it's one of the GameLoop executables
-            gameloop_exes = ['AndroidEmulator.exe', 'AndroidEmulatorEn.exe', 'AndroidEmulatorEx.exe']
+            gameloop_exes = ['androidemulator.exe', 'androidemulatoren.exe', 'androidemulatorex.exe']
             
             return exe_name in gameloop_exes
             
@@ -108,7 +103,6 @@ class MacroThread(QThread):
     
     def run(self):
         def on_click(x, y, button, pressed):
-            # Only process right-click when GameLoop is active
             if not self.is_gameloop_active():
                 return
                 
@@ -127,11 +121,9 @@ class MacroThread(QThread):
         
         while self.running:
             try:
-                # Check if GameLoop window is active
                 gameloop_active = self.is_gameloop_active()
                 
                 if not gameloop_active:
-                    # Release O if GameLoop is not active
                     if self.o_held:
                         keyboard.release('o')
                         self.o_held = False
@@ -139,7 +131,6 @@ class MacroThread(QThread):
                     time.sleep(0.05)
                     continue
                 
-                # GameLoop is active, process macro
                 if self.enabled:
                     e_pressed = keyboard.is_pressed('e')
                     q_pressed = keyboard.is_pressed('q')
@@ -258,9 +249,8 @@ class MainWindow(QMainWindow):
     
     def init_ui(self):
         self.setWindowTitle("Peak & Aim Assistant v1.0")
-        self.setFixedSize(400, 500)
+        self.setFixedSize(400, 630)
         
-        # Main palette
         palette = QPalette()
         palette.setColor(QPalette.Window, QColor(30, 30, 30))
         palette.setColor(QPalette.WindowText, Qt.white)
@@ -270,47 +260,35 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central_widget)
         
         layout = QVBoxLayout()
-        layout.setSpacing(5)
-        layout.setContentsMargins(0, 0, 0, 10)
         
-        # Red title bar area
-        title_widget = QWidget()
-        title_widget.setStyleSheet("background-color: #CC0000; padding: 10px;")
-        title_layout = QVBoxLayout()
-        title_layout.setSpacing(2)
+        # Title section with logo
+        title_layout = QHBoxLayout()
         
-        # Title with icon
-        title_h_layout = QHBoxLayout()
-        
-        if os.path.exists("icon.ico"):
+        if os.path.exists("logo.png"):
             logo_label = QLabel()
-            logo_pixmap = QPixmap("icon.ico")
-            logo_label.setPixmap(logo_pixmap.scaled(32, 32, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-            title_h_layout.addWidget(logo_label)
+            logo_pixmap = QPixmap("logo.png")
+            logo_label.setPixmap(logo_pixmap.scaled(48, 48, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            title_layout.addWidget(logo_label)
+        
+        title_text_layout = QVBoxLayout()
+        title_text_layout.setSpacing(2)
         
         title = QLabel("Peak & Aim Assistant")
         title.setFont(QFont("Segoe UI", 13, QFont.Bold))
-        title.setStyleSheet("color: white; background: transparent;")
-        title_h_layout.addWidget(title)
-        title_h_layout.addStretch()
+        title.setStyleSheet("color: white;")
+        title_text_layout.addWidget(title)
         
-        title_layout.addLayout(title_h_layout)
+        creator = QLabel("Created by MAAKTHUNDER")
+        creator.setFont(QFont("Segoe UI", 8))
+        creator.setStyleSheet("color: #AAAAAA;")
+        title_text_layout.addWidget(creator)
         
-        # Creator name
-        creator = QLabel("Created by MAAKTHUNERYT")
-        creator.setFont(QFont("Segoe UI", 9))
-        creator.setStyleSheet("color: white; background: transparent;")
-        title_layout.addWidget(creator)
+        title_layout.addLayout(title_text_layout)
+        title_layout.addStretch()
         
-        title_widget.setLayout(title_layout)
-        layout.addWidget(title_widget)
+        layout.addLayout(title_layout)
         
-        # Content area
-        content_widget = QWidget()
-        content_layout = QVBoxLayout()
-        content_layout.setContentsMargins(20, 10, 20, 10)
-        
-        content_layout.addWidget(QLabel("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", self))
+        layout.addWidget(QLabel("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", self))
         
         # Status
         status_layout = QHBoxLayout()
@@ -324,21 +302,21 @@ class MainWindow(QMainWindow):
         status_layout.addWidget(self.status_dot)
         status_layout.addWidget(self.status_text)
         status_layout.addStretch()
-        content_layout.addLayout(status_layout)
+        layout.addLayout(status_layout)
         
-        content_layout.addWidget(QLabel("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", self))
+        layout.addWidget(QLabel("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", self))
         
         # Toggle button
         self.toggle_btn = QPushButton("Toggle Macro (F8)")
         self.toggle_btn.setFont(QFont("Segoe UI", 10, QFont.Bold))
         self.toggle_btn.setFixedHeight(40)
         self.toggle_btn.clicked.connect(self.toggle_macro)
-        content_layout.addWidget(self.toggle_btn)
+        layout.addWidget(self.toggle_btn)
         
         # Overlay position
         pos_label = QLabel("Overlay Position:")
         pos_label.setStyleSheet("color: #AAAAAA;")
-        content_layout.addWidget(pos_label)
+        layout.addWidget(pos_label)
         
         pos_layout = QHBoxLayout()
         x_label = QLabel("X:")
@@ -358,83 +336,80 @@ class MainWindow(QMainWindow):
         apply_btn = QPushButton("Apply & Save")
         apply_btn.clicked.connect(self.apply_position)
         pos_layout.addWidget(apply_btn)
-        content_layout.addLayout(pos_layout)
+        layout.addLayout(pos_layout)
         
         # Checkboxes
         self.bg_check = QCheckBox("Show Background (Semi-transparent)")
         self.bg_check.setStyleSheet("color: white;")
         self.bg_check.setChecked(self.overlay_bg)
         self.bg_check.stateChanged.connect(self.toggle_background)
-        content_layout.addWidget(self.bg_check)
+        layout.addWidget(self.bg_check)
         
         self.minimize_check = QCheckBox("Start Minimized to Tray")
         self.minimize_check.setStyleSheet("color: white;")
         self.minimize_check.setChecked(self.start_minimized)
         self.minimize_check.stateChanged.connect(self.toggle_minimize)
-        content_layout.addWidget(self.minimize_check)
+        layout.addWidget(self.minimize_check)
         
         tip_label = QLabel("Tip: Only works when GameLoop is active")
         tip_label.setStyleSheet("color: #FF8800; font-size: 8pt;")
-        content_layout.addWidget(tip_label)
+        layout.addWidget(tip_label)
         
-        content_layout.addWidget(QLabel("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", self))
+        layout.addWidget(QLabel("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", self))
         
         # Hotkeys section
         hotkeys_label = QLabel("Hotkeys:")
         hotkeys_label.setStyleSheet("color: white; font-weight: bold;")
-        content_layout.addWidget(hotkeys_label)
+        layout.addWidget(hotkeys_label)
         
         hotkey1 = QLabel("F8 - Toggle Macro ON/OFF")
         hotkey1.setStyleSheet("color: #CCCCCC;")
-        content_layout.addWidget(hotkey1)
+        layout.addWidget(hotkey1)
         
         hotkey2 = QLabel("Q/E - Peak with Auto-Aim")
         hotkey2.setStyleSheet("color: #CCCCCC;")
-        content_layout.addWidget(hotkey2)
+        layout.addWidget(hotkey2)
         
-        content_layout.addWidget(QLabel("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", self))
+        layout.addWidget(QLabel("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", self))
         
         # Social links with icons
         youtube_layout = QHBoxLayout()
         youtube_layout.setSpacing(8)
         
-        if os.path.exists("youtube.ico"):
+        if os.path.exists("youtube.png"):
             yt_icon = QLabel()
-            yt_pixmap = QPixmap("youtube.ico")
+            yt_pixmap = QPixmap("youtube.png")
             yt_icon.setPixmap(yt_pixmap.scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation))
             youtube_layout.addWidget(yt_icon)
         
         yt_link = ClickableLabel("youtube.com/@MAAKTHUNDER", "https://www.youtube.com/@MAAKTHUNDER")
-        yt_link.setStyleSheet("color: #FF0000; text-decoration: underline;")
+        yt_link.setStyleSheet("color: #00BFFF; text-decoration: underline;")
         youtube_layout.addWidget(yt_link)
         youtube_layout.addStretch()
-        content_layout.addLayout(youtube_layout)
+        layout.addLayout(youtube_layout)
         
         tiktok_layout = QHBoxLayout()
         tiktok_layout.setSpacing(8)
         
-        if os.path.exists("tiktok.ico"):
+        if os.path.exists("tiktok.png"):
             tt_icon = QLabel()
-            tt_pixmap = QPixmap("tiktok.ico")
+            tt_pixmap = QPixmap("tiktok.png")
             tt_icon.setPixmap(tt_pixmap.scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation))
             tiktok_layout.addWidget(tt_icon)
         
         tt_link = ClickableLabel("tiktok.com/@maakthunder", "https://www.tiktok.com/@maakthunder")
-        tt_link.setStyleSheet("color: #00F5FF; text-decoration: underline;")
+        tt_link.setStyleSheet("color: #00BFFF; text-decoration: underline;")
         tiktok_layout.addWidget(tt_link)
         tiktok_layout.addStretch()
-        content_layout.addLayout(tiktok_layout)
+        layout.addLayout(tiktok_layout)
         
-        content_layout.addWidget(QLabel("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", self))
+        layout.addWidget(QLabel("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", self))
         
         # Footer
         footer = QLabel("Made for GameLoop | v1.0")
         footer.setStyleSheet("color: #888888;")
         footer.setAlignment(Qt.AlignCenter)
-        content_layout.addWidget(footer)
-        
-        content_widget.setLayout(content_layout)
-        layout.addWidget(content_widget)
+        layout.addWidget(footer)
         
         central_widget.setLayout(layout)
         
@@ -445,7 +420,7 @@ class MainWindow(QMainWindow):
     
     def setup_tray(self):
         self.tray_icon = QSystemTrayIcon(self)
-        self.tray_icon.setToolTip("Peak & Aim Assistant - MAAKTHUNERYT")
+        self.tray_icon.setToolTip("Peak & Aim Assistant - MAAKTHUNDER")
         
         if os.path.exists("icon.ico"):
             icon = QIcon("icon.ico")
