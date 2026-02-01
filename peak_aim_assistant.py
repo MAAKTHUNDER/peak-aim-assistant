@@ -521,7 +521,7 @@ class MainWindow(QMainWindow):
         self.minimize_check.stateChanged.connect(self.toggle_minimize)
         layout.addWidget(self.minimize_check)
         
-        tip_label = QLabel("Tip: Scope auto-resets after 10s inactivity")
+        tip_label = QLabel("Tip: Scope auto-resets after 30s inactivity")
         tip_label.setStyleSheet("color: #00FF00; font-size: 8pt;")
         layout.addWidget(tip_label)
         
