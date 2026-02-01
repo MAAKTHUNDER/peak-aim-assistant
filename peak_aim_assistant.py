@@ -137,9 +137,9 @@ class MacroThread(QThread):
         
         while self.running:
             try:
-                # Auto-reset scope after 10 seconds of inactivity
+                # Auto-reset scope after 30 seconds of inactivity
                 if self.scope_toggled:
-                    if (time.time() - self.last_right_click_activity) > 10.0:
+                    if (time.time() - self.last_right_click_activity) > 30.0:
                         self.scope_toggled = False
                 
                 if self.enabled != last_enabled:
