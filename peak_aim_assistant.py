@@ -3,6 +3,8 @@ import json
 import os
 import time
 import webbrowser
+import logging
+from datetime import datetime
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QLabel, QLineEdit, 
                              QCheckBox, QSystemTrayIcon, QMenu, QAction, QMessageBox)
@@ -10,6 +12,7 @@ from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal, QSharedMemory
 from PyQt5.QtGui import QIcon, QFont, QPalette, QColor, QPixmap, QCursor
 import keyboard
 from pynput.mouse import Button, Listener as MouseListener
+from logging.handlers import RotatingFileHandler
 
 def resource_path(relative_path):
     """Get absolute path to resource, works for dev and for PyInstaller"""
@@ -18,6 +21,42 @@ def resource_path(relative_path):
     except Exception:
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
+
+def setup_logging():
+    """Setup rotating file logger with millisecond precision"""
+    log_file = "peak_aim_log.txt"
+    
+    # Create logger
+    logger = logging.getLogger("PeakAimAssistant")
+    logger.setLevel(logging.DEBUG)
+    
+    # Remove existing handlers
+    logger.handlers = []
+    
+    # Create rotating file handler (2MB per file, keep 2 backups)
+    handler = RotatingFileHandler(
+        log_file,
+        maxBytes=2*1024*1024,  # 2MB
+        backupCount=2,
+        encoding='utf-8'
+    )
+    
+    # Custom formatter with milliseconds
+    class MillisecondFormatter(logging.Formatter):
+        def formatTime(self, record, datefmt=None):
+            ct = self.converter(record.created)
+            t = time.strftime("%Y-%m-%d %H:%M:%S", ct)
+            s = "%s.%03d" % (t, record.msecs)
+            return s
+    
+    formatter = MillisecondFormatter('[%(asctime)s] [%(levelname)s] %(message)s')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    
+    return logger
+
+# Initialize logger
+logger = setup_logging()
 
 class OverlayWindow(QWidget):
     def __init__(self):
@@ -38,6 +77,8 @@ class OverlayWindow(QWidget):
         layout.addWidget(self.label)
         layout.setContentsMargins(0, 0, 0, 0)
         self.setLayout(layout)
+        
+        logger.info("Overlay window created")
         
     def update_status(self, active, scope_open, show_bg):
         color = "#00FF00" if active else "#FF0000"
@@ -66,64 +107,134 @@ class MacroThread(QThread):
         self.right_click_time = 0
         self.running = True
         self.right_click_pressed = False
+        logger.info("Macro thread initialized")
     
     def run(self):
+        logger.info("Macro thread started")
+        
         def on_click(x, y, button, pressed):
             if button == Button.right:
                 if pressed:
                     self.right_click_time = time.time()
                     self.right_click_pressed = True
+                    logger.debug("MOUSE: Right-click DOWN")
                 else:
                     self.right_click_pressed = False
                     hold_duration = (time.time() - self.right_click_time) * 1000
+                    logger.debug(f"MOUSE: Right-click UP (held: {hold_duration:.0f}ms)")
+                    
                     if hold_duration < 300:
+                        old_state = self.scope_toggled
                         self.scope_toggled = not self.scope_toggled
+                        logger.info(f"SCOPE: Toggled {old_state} → {self.scope_toggled}")
         
         mouse_listener = MouseListener(on_click=on_click)
         mouse_listener.start()
+        logger.info("Mouse listener started")
+        
+        last_e_state = False
+        last_q_state = False
+        last_enabled = False
         
         while self.running:
             try:
+                # Log macro state changes
+                if self.enabled != last_enabled:
+                    logger.info(f"STATUS: Macro enabled flag = {self.enabled}")
+                    last_enabled = self.enabled
+                
                 if self.enabled:
                     e_pressed = keyboard.is_pressed('e')
                     q_pressed = keyboard.is_pressed('q')
                     
+                    # Log key state changes
+                    if e_pressed != last_e_state:
+                        logger.debug(f"KEY: E detected: {'DOWN' if e_pressed else 'UP'}")
+                        last_e_state = e_pressed
+                    
+                    if q_pressed != last_q_state:
+                        logger.debug(f"KEY: Q detected: {'DOWN' if q_pressed else 'UP'}")
+                        last_q_state = q_pressed
+                    
                     scope_active = self.scope_toggled or self.right_click_pressed
                     should_hold = (e_pressed or q_pressed) and not scope_active
                     
+                    # Log decision logic
+                    if (e_pressed or q_pressed):
+                        logger.debug(f"SCOPE: Status check - toggle:{self.scope_toggled} rclick:{self.right_click_pressed} active:{scope_active}")
+                        logger.debug(f"ACTION: Should hold O = {should_hold} (Q:{q_pressed} E:{e_pressed} Scope:{scope_active})")
+                    
                     if should_hold and not self.o_held:
-                        keyboard.press('o')
-                        self.o_held = True
+                        try:
+                            logger.debug("KEY: Sending keyboard.press('o')")
+                            keyboard.press('o')
+                            logger.info(f"STATE: o_held changed False → True")
+                            self.o_held = True
+                        except Exception as e:
+                            logger.error(f"ERROR: keyboard.press('o') failed - {str(e)}")
+                            logger.error(f"RECOVERY: Attempting to reset o_held state")
+                            self.o_held = False
+                            
                     elif not should_hold and self.o_held:
-                        keyboard.release('o')
-                        self.o_held = False
+                        try:
+                            logger.debug("KEY: Sending keyboard.release('o')")
+                            keyboard.release('o')
+                            logger.info(f"STATE: o_held changed True → False")
+                            self.o_held = False
+                        except Exception as e:
+                            logger.error(f"ERROR: keyboard.release('o') failed - {str(e)}")
+                            logger.error(f"RECOVERY: Force setting o_held to False")
+                            self.o_held = False
                         
                     self.status_update.emit(True, scope_active)
                 else:
-                    if self.o_held:
-                        keyboard.release('o')
-                        self.o_held = False
-                    self.status_update.emit(False, self.scope_toggled)
+                    # Reset key states when disabled
+                    if last_e_state or last_q_state:
+                        last_e_state = False
+                        last_q_state = False
+                        logger.debug("KEY: Reset E and Q states (macro disabled)")
                     
-                time.sleep(0.01)
+                    if self.o_held:
+                        try:
+                            logger.debug("KEY: Macro disabled - releasing O")
+                            keyboard.release('o')
+                            logger.info(f"STATE: o_held changed True → False (macro disabled)")
+                            self.o_held = False
+                        except Exception as e:
+                            logger.error(f"ERROR: Failed to release O on disable - {str(e)}")
+                            self.o_held = False
+                            
+                    self.status_update.emit(False, self.scope_toggled)
+                
+                # Optimized sleep times for CPU usage
+                if self.enabled:
+                    time.sleep(0.05)  # 50ms when active (20 checks/second)
+                else:
+                    time.sleep(0.2)   # 200ms when inactive (5 checks/second)
                 
             except Exception as e:
-                print(f"Macro thread error: {e}")
+                logger.error(f"CRITICAL ERROR in macro thread: {str(e)}")
+                logger.error(f"RECOVERY: Attempting to release O key")
                 if self.o_held:
                     try:
                         keyboard.release('o')
+                        logger.info("RECOVERY: Successfully released O")
                     except:
-                        pass
+                        logger.error("RECOVERY: Failed to release O")
                     self.o_held = False
                 time.sleep(0.1)
+        
+        logger.info("Macro thread stopping")
     
     def stop(self):
+        logger.info("Macro thread stop requested")
         self.running = False
         if self.o_held:
             try:
                 keyboard.release('o')
-            except:
-                pass
+                logger.info("SHUTDOWN: Released O key")
+            except Exception as e:
+                logger.error(f"SHUTDOWN: Failed to release O - {str(e)}")
 
 class ClickableLabel(QLabel):
     """Custom clickable label for links"""
@@ -133,11 +244,16 @@ class ClickableLabel(QLabel):
         self.setCursor(QCursor(Qt.PointingHandCursor))
         
     def mousePressEvent(self, event):
+        logger.info(f"UI: Opening URL - {self.url}")
         webbrowser.open(self.url)
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        logger.info("═══════════════════════════════════════")
+        logger.info("STARTUP: Peak & Aim Assistant v1.0")
+        logger.info("═══════════════════════════════════════")
+        
         self.settings_file = "settings.json"
         self.load_settings()
         
@@ -150,12 +266,15 @@ class MainWindow(QMainWindow):
         self.setup_overlay()
         
         keyboard.add_hotkey('f8', self.toggle_macro)
+        logger.info("STARTUP: F8 hotkey registered")
         
         self.watchdog_timer = QTimer()
         self.watchdog_timer.timeout.connect(self.watchdog_check)
         self.watchdog_timer.start(2000)
+        logger.info("STARTUP: Watchdog timer started (2000ms interval)")
         
         self.set_window_icon()
+        logger.info("STARTUP: Initialization complete")
         
     def set_window_icon(self):
         """Set window icon"""
@@ -163,10 +282,12 @@ class MainWindow(QMainWindow):
         if os.path.exists(icon_path):
             icon = QIcon(icon_path)
             self.setWindowIcon(icon)
+            logger.debug(f"UI: Window icon loaded from {icon_path}")
         else:
             pixmap = QPixmap(32, 32)
             pixmap.fill(QColor(0, 255, 0))
             self.setWindowIcon(QIcon(pixmap))
+            logger.warning("UI: icon.ico not found, using placeholder")
     
     def load_settings(self):
         try:
@@ -178,13 +299,17 @@ class MainWindow(QMainWindow):
                     self.overlay_bg = settings.get('overlay_bg', True)
                     self.start_minimized = settings.get('start_minimized', False)
                     self.is_first_run = False
+                    logger.info(f"SETTINGS: Loaded from {self.settings_file}")
+                    logger.debug(f"SETTINGS: overlay_x={self.overlay_x}, overlay_y={self.overlay_y}, bg={self.overlay_bg}, minimized={self.start_minimized}")
             else:
                 self.overlay_x = 1600
                 self.overlay_y = 50
                 self.overlay_bg = True
                 self.start_minimized = False
                 self.is_first_run = True
-        except:
+                logger.info("SETTINGS: Using defaults (first run)")
+        except Exception as e:
+            logger.error(f"SETTINGS: Failed to load - {str(e)}")
             self.overlay_x = 1600
             self.overlay_y = 50
             self.overlay_bg = True
@@ -192,18 +317,23 @@ class MainWindow(QMainWindow):
             self.is_first_run = True
     
     def save_settings(self):
-        settings = {
-            'overlay_x': self.overlay_x,
-            'overlay_y': self.overlay_y,
-            'overlay_bg': self.overlay_bg,
-            'start_minimized': self.start_minimized
-        }
-        with open(self.settings_file, 'w') as f:
-            json.dump(settings, f)
+        try:
+            settings = {
+                'overlay_x': self.overlay_x,
+                'overlay_y': self.overlay_y,
+                'overlay_bg': self.overlay_bg,
+                'start_minimized': self.start_minimized
+            }
+            with open(self.settings_file, 'w') as f:
+                json.dump(settings, f)
+            logger.info("SETTINGS: Saved successfully")
+            logger.debug(f"SETTINGS: {settings}")
+        except Exception as e:
+            logger.error(f"SETTINGS: Failed to save - {str(e)}")
     
     def init_ui(self):
         self.setWindowTitle("Peak & Aim Assistant v1.0")
-        self.setFixedSize(400, 650)
+        self.setFixedSize(400, 680)
         
         palette = QPalette()
         palette.setColor(QPalette.Window, QColor(30, 30, 30))
@@ -226,6 +356,9 @@ class MainWindow(QMainWindow):
             logo_pixmap = QPixmap(logo_path)
             logo_label.setPixmap(logo_pixmap.scaled(64, 64, Qt.KeepAspectRatio, Qt.SmoothTransformation))
             title_container.addWidget(logo_label)
+            logger.debug(f"UI: Logo loaded from {logo_path}")
+        else:
+            logger.warning("UI: logo.png not found")
         
         title_text_layout = QVBoxLayout()
         title_text_layout.setSpacing(0)
@@ -271,6 +404,13 @@ class MainWindow(QMainWindow):
         self.toggle_btn.setFixedHeight(40)
         self.toggle_btn.clicked.connect(self.toggle_macro)
         layout.addWidget(self.toggle_btn)
+        
+        # View Logs button
+        view_logs_btn = QPushButton("📄 View Logs")
+        view_logs_btn.setFont(QFont("Segoe UI", 9))
+        view_logs_btn.setFixedHeight(30)
+        view_logs_btn.clicked.connect(self.view_logs)
+        layout.addWidget(view_logs_btn)
         
         # Overlay position
         pos_label = QLabel("Overlay Position:")
@@ -378,8 +518,24 @@ class MainWindow(QMainWindow):
         
         if self.is_first_run or not self.start_minimized:
             self.show()
+            logger.info("UI: Main window shown")
         else:
             self.hide()
+            logger.info("UI: Started minimized to tray")
+    
+    def view_logs(self):
+        """Open log file in default text editor"""
+        log_file = "peak_aim_log.txt"
+        try:
+            if os.path.exists(log_file):
+                logger.info("UI: Opening log file")
+                os.startfile(log_file)
+            else:
+                logger.warning("UI: Log file not found")
+                QMessageBox.information(self, "Logs", "Log file not found yet.\nLogs will be created as the app runs.")
+        except Exception as e:
+            logger.error(f"UI: Failed to open log file - {str(e)}")
+            QMessageBox.warning(self, "Error", f"Could not open log file:\n{str(e)}")
     
     def setup_tray(self):
         self.tray_icon = QSystemTrayIcon(self)
@@ -413,16 +569,29 @@ class MainWindow(QMainWindow):
         self.tray_icon.setContextMenu(tray_menu)
         self.tray_icon.activated.connect(self.tray_clicked)
         self.tray_icon.show()
+        logger.info("UI: System tray icon created")
     
     def tray_clicked(self, reason):
         if reason == QSystemTrayIcon.DoubleClick:
             self.show()
+            logger.info("UI: Window shown from tray")
     
     def setup_overlay(self):
         self.overlay = OverlayWindow()
         self.overlay.move(self.overlay_x, self.overlay_y)
         self.overlay.update_status(False, False, self.overlay_bg)
         self.overlay.show()
+        logger.info(f"OVERLAY: Created at X:{self.overlay_x} Y:{self.overlay_y}")
+        
+        # Optimized overlay update timer
+        self.overlay_timer = QTimer()
+        self.overlay_timer.timeout.connect(self.update_overlay_display)
+        self.overlay_timer.start(300)  # 300ms for lower CPU usage
+        logger.info("OVERLAY: Update timer started (300ms interval)")
+    
+    def update_overlay_display(self):
+        """Separate function for overlay timer updates"""
+        pass  # Actual updates happen via signals
     
     def update_overlay_status(self, active, scope_open):
         self.overlay.update_status(active, scope_open, self.overlay_bg)
@@ -437,7 +606,9 @@ class MainWindow(QMainWindow):
             self.status_text.setText("INACTIVE")
     
     def toggle_macro(self):
+        old_state = self.macro_thread.enabled
         self.macro_thread.enabled = not self.macro_thread.enabled
+        logger.info(f"ACTION: F8 pressed - Macro: {old_state} → {self.macro_thread.enabled}")
     
     def apply_position(self):
         try:
@@ -445,33 +616,51 @@ class MainWindow(QMainWindow):
             self.overlay_y = int(self.y_input.text())
             self.overlay.move(self.overlay_x, self.overlay_y)
             self.save_settings()
+            logger.info(f"UI: Overlay position changed to X:{self.overlay_x} Y:{self.overlay_y}")
             QMessageBox.information(self, "Success", f"Position saved: X={self.overlay_x}, Y={self.overlay_y}")
-        except:
+        except Exception as e:
+            logger.error(f"UI: Invalid position values - {str(e)}")
             QMessageBox.warning(self, "Error", "Invalid position values!")
     
     def toggle_background(self):
         self.overlay_bg = self.bg_check.isChecked()
         self.save_settings()
+        logger.info(f"UI: Overlay background changed to {self.overlay_bg}")
     
     def toggle_minimize(self):
         self.start_minimized = self.minimize_check.isChecked()
         self.save_settings()
+        logger.info(f"UI: Start minimized changed to {self.start_minimized}")
     
     def watchdog_check(self):
-        if not self.macro_thread.enabled and self.macro_thread.o_held:
-            try:
-                keyboard.release('o')
-                self.macro_thread.o_held = False
-            except:
-                pass
+        """Watchdog timer to detect stuck O key"""
+        if self.macro_thread.o_held:
+            e_state = keyboard.is_pressed('e')
+            q_state = keyboard.is_pressed('q')
+            
+            if not e_state and not q_state:
+                logger.warning(f"WATCHDOG: Stuck key detected - o_held=True but Q:{q_state} E:{e_state}")
+                logger.warning("WATCHDOG: Force releasing O key")
+                try:
+                    keyboard.release('o')
+                    self.macro_thread.o_held = False
+                    logger.info("WATCHDOG: Successfully released stuck O key")
+                except Exception as e:
+                    logger.error(f"WATCHDOG: Failed to release O - {str(e)}")
     
     def closeEvent(self, event):
         event.ignore()
         self.hide()
+        logger.info("UI: Window hidden (minimized to tray)")
     
     def quit_app(self):
+        logger.info("SHUTDOWN: Exit requested")
         self.macro_thread.stop()
         self.macro_thread.wait()
+        logger.info("SHUTDOWN: Macro thread stopped")
+        logger.info("═══════════════════════════════════════")
+        logger.info("SHUTDOWN: Application closed")
+        logger.info("═══════════════════════════════════════")
         QApplication.quit()
 
 def main():
@@ -482,7 +671,7 @@ def main():
     shared_mem = QSharedMemory("PeakAimAssistantUniqueName")
     
     if not shared_mem.create(1):
-        # App is already running
+        logger.warning("STARTUP: Another instance already running")
         msg = QMessageBox()
         msg.setIcon(QMessageBox.Warning)
         msg.setWindowTitle("Already Running")
